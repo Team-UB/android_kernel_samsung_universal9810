@@ -473,6 +473,83 @@ static void tmu_core_enable(struct platform_device *pdev)
 	struct exynos_tmu_data *data = platform_get_drvdata(pdev);
 	unsigned int ctrl;
 
+	struct exynos_tmu_platform_data *pdata = data->pdata;
+	struct thermal_zone_device *tz = data->tzd;
+	unsigned int status, trim_info;
+	unsigned int rising_threshold = 0, falling_threshold = 0;
+	int temp, temp_hist;
+	int ret = 0, threshold_code, i, sensor_id, cal_type;
+
+	status = readb(data->base + EXYNOS_TMU_REG_STATUS);
+	if (!status) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	trim_info = readl(data->base + EXYNOS_TMU_REG_TRIMINFO);
+	sanitize_temp_error(data, trim_info);
+
+	/* Read the temperature sensor id */
+	sensor_id = (trim_info & EXYNOS5433_TRIMINFO_SENSOR_ID_MASK)
+				>> EXYNOS5433_TRIMINFO_SENSOR_ID_SHIFT;
+	dev_info(&pdev->dev, "Temperature sensor ID: 0x%x\n", sensor_id);
+
+	/* Read the calibration mode */
+	writel(trim_info, data->base + EXYNOS_TMU_REG_TRIMINFO);
+	cal_type = (trim_info & EXYNOS5433_TRIMINFO_CALIB_SEL_MASK)
+				>> EXYNOS5433_TRIMINFO_CALIB_SEL_SHIFT;
+
+	switch (cal_type) {
+	case EXYNOS5433_TRIMINFO_ONE_POINT_TRIMMING:
+		pdata->cal_type = TYPE_ONE_POINT_TRIMMING;
+		break;
+	case EXYNOS5433_TRIMINFO_TWO_POINT_TRIMMING:
+		pdata->cal_type = TYPE_TWO_POINT_TRIMMING;
+		break;
+	default:
+		pdata->cal_type = TYPE_ONE_POINT_TRIMMING;
+		break;
+	}
+
+	dev_info(&pdev->dev, "Calibration type is %d-point calibration\n",
+			cal_type ?  2 : 1);
+
+	/* Write temperature code for rising and falling threshold */
+	for (i = 0; i < of_thermal_get_ntrips(tz); i++) {
+		int rising_reg_offset, falling_reg_offset;
+		int j = 0;
+
+		switch (i) {
+		case 0:
+		case 1:
+		case 2:
+		case 3:
+			rising_reg_offset = EXYNOS5433_THD_TEMP_RISE3_0;
+			falling_reg_offset = EXYNOS5433_THD_TEMP_FALL3_0;
+			j = i;
+			break;
+		case 4:
+		case 5:
+		case 6:
+		case 7:
+			rising_reg_offset = EXYNOS5433_THD_TEMP_RISE7_4;
+			falling_reg_offset = EXYNOS5433_THD_TEMP_FALL7_4;
+			j = i - 4;
+			break;
+		default:
+			continue;
+		}
+
+		/* Write temperature code for rising threshold */
+		tz->ops->get_trip_temp(tz, i, &temp);
+		temp /= MCELSIUS;
+		threshold_code = temp_to_code(data, temp);
+
+		rising_threshold = readl(data->base + rising_reg_offset);
+		rising_threshold &= ~(0xff << j * 8);
+		rising_threshold |= (threshold_code << j * 8);
+		writel(rising_threshold, data->base + rising_reg_offset);
+
 	/* set TRIP_EN, CORE_EN */
 	ctrl = readl(data->base + EXYNOS_TMU_REG_CONTROL);
 	ctrl |= (1 << EXYNOS_TMU_THERM_TRIP_EN_SHIFT);
