@@ -16,7 +16,7 @@
 #endif
 
 /* on 4.10 walk_stackframe was unexported so use save_stack_trace instead */
-#if defined(MODULE) && defined(__aarch64__) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0))
+#if defined(MODULE) && defined(__aarch64__) && ((LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)) || defined(CONFIG_THREAD_INFO_IN_TASK))
 #define GATOR_KERNEL_UNWINDING_USE_WALK_STACKFRAME  0
 #else
 #define GATOR_KERNEL_UNWINDING_USE_WALK_STACKFRAME  1
@@ -65,9 +65,6 @@ static int report_trace(struct stackframe *frame, void *d)
 #else
               (unsigned long)mod->core_layout.base;
 #endif
-        }
-        else {
-            cookie = NO_COOKIE;
         }
 #endif
         marshal_backtrace(addr & ~1, cookie, 1);
@@ -131,9 +128,6 @@ static void report_trace(unsigned int cpu, struct stack_trace * trace)
 #else
               (unsigned long) mod->core_layout.base;
 #endif
-        }
-        else {
-            cookie = NO_COOKIE;
         }
 #endif
         marshal_backtrace(addr & ~1, cookie, 1);
